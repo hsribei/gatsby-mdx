@@ -13,7 +13,10 @@ module.exports = {
           "./src/components/default-page-layout.js"
         ),
         mdPlugins: [require("remark-toc")],
-        gatsbyRemarkPlugins: ["gatsby-remark-prismjs"]
+        gatsbyRemarkPlugins: [
+          { resolve: `gatsby-remark-katex` },
+          { resolve: "gatsby-remark-prismjs", options: {} }
+        ]
       }
     },
     {
