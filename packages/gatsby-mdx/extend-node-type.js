@@ -25,15 +25,44 @@ const BabelPluginPluckImports = require("babel-plugin-pluck-imports");
 const objRestSpread = require("@babel/plugin-proposal-object-rest-spread");
 const babel = require("@babel/core");
 const rawMDX = require("@mdx-js/mdx");
+const Promise = require(`bluebird`);
 
+const debug = require("debug")("gatsby-mdx:extend-node-type");
 const mdx = require("./utils/mdx");
 const getTableOfContents = require("./utils/get-table-of-content");
 const defaultOptions = require("./utils/default-options");
 
 const stripFrontmatter = source => grayMatter(source).content;
 
+function mutateNode({
+  pluginOptions,
+  mdxNode,
+  getNode,
+  files,
+  reporter,
+  cache
+}) {
+  return Promise.each(pluginOptions.gatsbyRemarkPlugins, plugin => {
+    const requiredPlugin = require(plugin.resolve);
+    if (_.isFunction(requiredPlugin.mutateSource)) {
+      return requiredPlugin.mutateSource(
+        {
+          mdxNode,
+          files: fileNodes,
+          getNode,
+          reporter,
+          cache
+        },
+        plugin.pluginOptions
+      );
+    } else {
+      return Promise.resolve();
+    }
+  });
+}
+
 module.exports = (
-  { type /*store, pathPrefix, getNode, getNodes, cache, reporter*/ },
+  { type /*store, pathPrefix*/, getNode, getNodes, cache, reporter },
   pluginOptions
 ) => {
   if (!type.name.endsWith(`Mdx`)) {
@@ -42,6 +71,28 @@ module.exports = (
 
   const options = defaultOptions(pluginOptions);
   const compiler = createMdxAstCompiler(options);
+
+  for (let plugin of pluginOptions.gatsbyRemarkPlugins) {
+    debug("requiring", plugin);
+    const requiredPlugin = require(plugin.resolve);
+    debug("required", plugin);
+    if (_.isFunction(requiredPlugin.setParserPlugins)) {
+      for (let parserPlugin of requiredPlugin.setParserPlugins(
+        plugin.pluginOptions
+      )) {
+        if (_.isArray(parserPlugin)) {
+          const [parser, parserPluginOptions] = parserPlugin;
+          debug("adding mdPlugin with options", plugin, parserPluginOptions);
+          options.mdPlugins.push([parser, parserPluginOptions]);
+          //          remark = remark.use(parser, options);
+        } else {
+          debug("adding mdPlugin", plugin);
+          options.mdPlugins.push(parserPlugin);
+          //          remark = remark.use(parserPlugin);
+        }
+      }
+    }
+  }
 
   return new Promise((resolve /*, reject*/) => {
     async function getAST(mdxNode) {
@@ -66,6 +117,15 @@ module.exports = (
     }
 
     async function getCode(mdxNode, overrideOptions) {
+      await mutateNode({
+        pluginOptions,
+        mdxNode,
+        files: getNodes().filter(n => n.internal.type === `File`),
+        getNode,
+        reporter,
+        cache
+      });
+
       const code = await mdx(mdxNode.rawBody, {
         ...options,
         ...overrideOptions
@@ -123,6 +183,15 @@ ${code}`;
             body: {
               type: GraphQLString,
               async resolve(mdxNode) {
+                await mutateNode({
+                  pluginOptions,
+                  mdxNode,
+                  files: getNodes().filter(n => n.internal.type === `File`),
+                  getNode,
+                  reporter,
+                  cache
+                });
+
                 const { content } = grayMatter(mdxNode.rawBody);
                 let code = await rawMDX(content, {
                   ...options

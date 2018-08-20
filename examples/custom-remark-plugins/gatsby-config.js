@@ -12,7 +12,8 @@ module.exports = {
         defaultLayout: require.resolve(
           "./src/components/default-page-layout.js"
         ),
-        mdPlugins: [require("remark-toc")]
+        mdPlugins: [require("remark-toc")],
+        gatsbyRemarkPlugins: ["gatsby-remark-prismjs"]
       }
     },
     {
