@@ -29,7 +29,7 @@
   },
   "devDependencies": {
     "gatsby-remark-katex": "^1.0.14",
-    "gatsby-remark-prismjs": "next",
+    "gatsby-remark-prismjs": "^2.0.5",
     "prismjs": "^1.15.0"
   }
 }

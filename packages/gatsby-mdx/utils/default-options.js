@@ -8,7 +8,8 @@ module.exports = pluginOptions => {
       extensions: [".mdx"],
       hastPlugins: [],
       mdPlugins: [],
-      transformers: {}
+      transformers: {},
+      gatsbyRemarkPlugins: []
     },
     pluginOptions
   );

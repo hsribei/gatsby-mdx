@@ -31,6 +31,7 @@ const debug = require("debug")("gatsby-mdx:extend-node-type");
 const mdx = require("./utils/mdx");
 const getTableOfContents = require("./utils/get-table-of-content");
 const defaultOptions = require("./utils/default-options");
+const getSourcePluginsAsRemarkPlugins = require("./utils/get-source-plugins-as-remark-plugins");
 
 const stripFrontmatter = source => grayMatter(source).content;
 /* 
@@ -62,84 +63,8 @@ const stripFrontmatter = source => grayMatter(source).content;
  * }
  *  */
 
-async function applySourcePlugins({
-  pluginOptions,
-  mdxNode,
-  files,
-  getNode,
-  reporter,
-  cache
-}) {
-  const markdownAST = remark.parse(markdownNode.internal.content);
-
-  if (pathPrefix) {
-    // Ensure relative links include `pathPrefix`
-    visit(markdownAST, `link`, node => {
-      if (node.url && node.url.startsWith(`/`) && !node.url.startsWith(`//`)) {
-        node.url = withPathPrefix(node.url, pathPrefix);
-      }
-    });
-  }
-
-  // source => parse (can order parsing for dependencies) => typegen
-  //
-  // source plugins identify nodes, provide id, initial parse, know
-  // when nodes are created/removed/deleted
-  // get passed cached DataTree and return list of clean and dirty nodes.
-  // Also get passed `dirtyNodes` function which they can call with an array
-  // of node ids which will then get re-parsed and the inferred schema
-  // recreated (if inferring schema gets too expensive, can also
-  // cache the schema until a query fails at which point recreate the
-  // schema).
-  //
-  // parse plugins take data from source nodes and extend it, never mutate
-  // it. Freeze all nodes once done so typegen plugins can't change it
-  // this lets us save off the DataTree at that point as well as create
-  // indexes.
-  //
-  // typegen plugins identify further types of data that should be lazily
-  // computed due to their expense, or are hard to infer graphql type
-  // (markdown ast), or are need user input in order to derive e.g.
-  // markdown headers or date fields.
-  //
-  // wrap all resolve functions to (a) auto-memoize and (b) cache to disk any
-  // resolve function that takes longer than ~10ms (do research on this
-  // e.g. how long reading/writing to cache takes), and (c) track which
-  // queries are based on which source nodes. Also if connection of what
-  // which are always rerun if their underlying nodes change..
-  //
-  // every node type in DataTree gets a schema type automatically.
-  // typegen plugins just modify the auto-generated types to add derived fields
-  // as well as computationally expensive fields.
-  if (process.env.NODE_ENV !== `production` || !fileNodes) {
-    fileNodes = getNodes().filter(n => n.internal.type === `File`);
-  }
-  // Use Bluebird's Promise function "each" to run remark plugins serially.
-  const ast = await Promise.each(pluginOptions.plugins, plugin => {
-    const requiredPlugin = require(plugin.resolve);
-    if (_.isFunction(requiredPlugin)) {
-      return requiredPlugin(
-        {
-          markdownAST,
-          markdownNode,
-          getNode,
-          files: fileNodes,
-          pathPrefix,
-          reporter,
-          cache
-        },
-        plugin.pluginOptions
-      );
-    } else {
-      return Promise.resolve();
-    }
-  }).then(() => {
-    return markdownAST;
-  });
-}
-
 module.exports = (
-  { type /*store, pathPrefix*/, getNode, getNodes, cache, reporter },
+  { type /*store*/, pathPrefix, getNode, getNodes, cache, reporter },
   pluginOptions
 ) => {
   if (!type.name.endsWith(`Mdx`)) {
@@ -149,7 +74,7 @@ module.exports = (
   const options = defaultOptions(pluginOptions);
   const compiler = createMdxAstCompiler(options);
 
-  for (let plugin of pluginOptions.gatsbyRemarkPlugins) {
+  for (let plugin of options.gatsbyRemarkPlugins) {
     if (!plugin.resolve) {
       throw new Error(
         'gatsby-remark plugins must be configured in the form {resolve: "plugin", options: {}}'
@@ -248,6 +173,26 @@ ${code}`;
       }
     });
 
+    async function rawMDXWithGatsbyRemarkPlugins(content, opts, mdxNode) {
+      const gatsbyRemarkPluginsAsMDPlugins = await getSourcePluginsAsRemarkPlugins(
+        {
+          gatsbyRemarkPlugins: options.gatsbyRemarkPlugins,
+          mdxNode,
+          //          files,
+          getNode,
+          getNodes,
+          reporter,
+          cache,
+          pathPrefix
+        }
+      );
+
+      return rawMDX(content, {
+        ...options,
+        mdPlugins: options.mdPlugins.concat(gatsbyRemarkPluginsAsMDPlugins)
+      });
+    }
+
     return resolve({
       code: {
         resolve(mdxNode) {
@@ -275,9 +220,14 @@ ${code}`;
                  * }); */
 
                 const { content } = grayMatter(mdxNode.rawBody);
-                let code = await rawMDX(content, {
-                  ...options
-                });
+
+                let code = await rawMDXWithGatsbyRemarkPlugins(
+                  content,
+                  {
+                    ...options
+                  },
+                  mdxNode
+                );
 
                 const instance = new BabelPluginPluckImports();
                 const result = babel.transform(code, {
@@ -321,9 +271,14 @@ ${code}`;
                     .digest(`hex`);
 
                 const { content } = grayMatter(mdxNode.rawBody);
-                let code = await rawMDX(content, {
-                  ...options
-                });
+
+                let code = await rawMDXWithGatsbyRemarkPlugins(
+                  content,
+                  {
+                    ...options
+                  },
+                  mdxNode
+                );
 
                 const instance = new BabelPluginPluckImports();
                 babel.transform(code, {

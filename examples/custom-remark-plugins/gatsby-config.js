@@ -8,6 +8,7 @@ module.exports = {
     {
       resolve: `gatsby-mdx`,
       options: {
+        root: __dirname,
         extensions: [".mdx", ".md"],
         defaultLayout: require.resolve(
           "./src/components/default-page-layout.js"
